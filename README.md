@@ -1,3 +1,4 @@
+
 <img src="doc/klaxon.png" alt="Klaxon logo" height="101" width="220" />
 
 Klaxon is a library to parse JSON in Kotlin.
@@ -157,8 +158,8 @@ val myConverter = object: Converter {
     override fun canConvert(cls: Class<*>)
         = cls == BooleanHolder::class.java
 
-    override fun toJson(value: BooleanHolder): String?
-        = """{"flag" : "${if (value.flag == true) 1 else 0}"""
+    override fun toJson(value: Any): String
+        = """{"flag" : "${if ((value as BooleanHolder).flag == true) 1 else 0}"""
 
     override fun fromJson(jv: JsonValue)
         = BooleanHolder(jv.objInt("flag") != 0)
@@ -243,6 +244,30 @@ val result = Klaxon()
 
 assert(result?.date == LocalDateTime.of(2017, 5, 10, 16, 30))
 ```
+
+### Property strategy
+
+You can instruct Klaxon to dynamically ignore properties with the `PropertyStrategy` interface:
+
+```kotlin
+interface PropertyStrategy {
+    /**
+     * @return true if this property should be mapped.
+     */
+    fun accept(property: KProperty<*>): Boolean
+}
+```
+
+This is a dynamic version of `@Json(ignored = true)`, which you can register with your `Klaxon` instance with the function `propertyStrategy()`:
+
+```kotlin
+val ps = object: PropertyStrategy {
+    override fun accept(property: KProperty<*>) = property.name != "something"
+}
+val klaxon = Klaxon().propertyStrategy(ps)
+```
+
+You can define multiple `PropertyStrategy` instances, and in such a case, they all need to return `true` for a property to be included.
 
 ## <a name="streamingApi">Streaming API</a>
 

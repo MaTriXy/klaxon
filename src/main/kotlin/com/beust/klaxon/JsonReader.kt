@@ -1,6 +1,7 @@
 package com.beust.klaxon
 
 import java.io.Reader
+import java.math.BigInteger
 
 /**
  * Manages JSON streaming.
@@ -8,18 +9,64 @@ import java.io.Reader
 class JsonReader(val reader: Reader) : Reader() {
     /**
      * @return the next String.
+     * @throws JsonParsingException the next value is not a String.
      */
-    fun nextString() = consumeValue { value -> value.toString() }
+    fun nextString() = consumeValue { value ->
+        value as? String ?: throw JsonParsingException("Next token is not a string: $value")
+    }
 
     /**
      * @return the next Int.
+     * @throws JsonParsingException the next value is not an Int.
      */
-    fun nextInt() = consumeValue { value -> value as Int }
+    fun nextInt() = consumeValue { value ->
+        value as? Int ?: throw JsonParsingException("Next token is not a int: $value")
+    }
+
+    /**
+     * @return the next Long (upscaling as needed).
+     * @throws JsonParsingException the next value is not an Long.
+     */
+    fun nextLong() = consumeValue { value ->
+        when (value) {
+            is Int -> value.toLong()
+            is Long -> value
+            else -> throw JsonParsingException("Next token is not a long: $value")
+        }
+    }
+
+    /**
+     * @return the next BigInteger (upscaling as needed).
+     * @throws JsonParsingException the next value is not an BigInteger.
+     */
+    fun nextBigInteger() = consumeValue { value ->
+        when (value) {
+            is Int -> value.toBigInteger()
+            is Long -> value.toBigInteger()
+            is BigInteger -> value
+            else -> throw JsonParsingException("Next token is not a big integer: $value")
+        }
+    }
+
+    /**
+     * @return the next Double (upscaling as needed).
+     * @throws JsonParsingException the next value is not a Double.
+     */
+    fun nextDouble() = consumeValue { value ->
+        when (value) {
+            is Int -> value.toDouble()
+            is Double -> value
+            else -> throw JsonParsingException("Next token is not a double: $value")
+        }
+    }
 
     /**
      * @return the next boolean.
+     * @throws JsonParsingException the next value is not a Boolean.
      */
-    fun nextBoolean() = consumeValue { value -> value as Boolean }
+    fun nextBoolean() = consumeValue { value ->
+        value as? Boolean ?: throw JsonParsingException("Next token is not a boolean: $value")
+    }
 
     /**
      * @return the next object, making sure the current token is an open brace and the last token is a closing brace.

@@ -1,6 +1,7 @@
 package com.beust.klaxon
 
 import org.assertj.core.api.Assertions.assertThat
+import org.intellij.lang.annotations.Language
 import org.testng.Assert
 import org.testng.annotations.BeforeClass
 import org.testng.annotations.Test
@@ -420,4 +421,63 @@ class KlaxonTest {
         Assert.assertEquals(Klaxon().toJsonString(Colour.Red), "\"Red\"")
     }
 
+    @Test
+    fun nonConstructorProperties() {
+        val result = Klaxon().parse<Registry>(someString)
+        val vendors = result?.vendor!!
+        assertThat("example").isEqualTo(result.name)
+        assertThat("example").isEqualTo(vendors[0].vendorName)
+    }
+
+    private class Vendor {
+        var vendorName : String = ""
+    }
+
+    @Language("json")
+    private val someString = """{
+        "name": "example",
+        "foo": "cool",
+        "boo": "stuff",
+        "vendor": [
+          { "vendorName": "example"}
+        ]
+    }"""
+
+
+    @Test
+    fun testParseRegistry() {
+        val result = Klaxon().parse<Registry>(someString)
+        val vendors = result?.vendor!!
+        assertEquals("example", result!!.name)
+        assertEquals("cool", result.foo)
+        assertEquals("stuff", result.boo)
+        assertEquals("example", vendors[0].vendorName)
+    }
+    private class Registry(val name : String,
+            val vendor : List<Vendor> = ArrayList()) {
+        var foo : String = ""
+        var boo : String = ""
+    }
+
+    fun issue153() {
+        abstract class FooBase(
+                val id: String? = null
+        )
+
+        class BarImpl(
+                val barValue: String? = null
+        ): FooBase()
+
+
+        val barImpl = Klaxon()
+                .parse<BarImpl>("""
+                {
+                    "id": "id123",
+                    "barValue" : "value123"
+                }
+                """)
+
+        assertThat(barImpl?.barValue).isEqualTo("value123")
+        assertThat(barImpl?.id).isEqualTo("id123")
+    }
 }

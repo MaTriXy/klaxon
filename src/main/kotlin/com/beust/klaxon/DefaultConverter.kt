@@ -1,5 +1,6 @@
 package com.beust.klaxon
 
+import com.beust.klaxon.Reflection.Companion.isAssignableFromAny
 import java.lang.reflect.ParameterizedType
 import java.math.BigDecimal
 import kotlin.reflect.KClass
@@ -42,7 +43,11 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
 
         val result = when (value) {
             is String, is Enum<*> -> "\"" + Render.escapeString(value.toString()) + "\""
-            is Double, is Int, is Boolean, is Long -> value.toString()
+            is Double, is Float, is Int, is Boolean, is Long -> value.toString()
+            is Array<*> -> {
+                val elements = value.filterNotNull().map { klaxon.toJsonString(it) }
+                joinToString(elements, "[", "]")
+            }
             is Collection<*> -> {
                 val elements = value.filterNotNull().map { klaxon.toJsonString(it) }
                 joinToString(elements, "[", "]")
@@ -57,14 +62,14 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
             }
             else -> {
                 val valueList = arrayListOf<String>()
-                val properties = Annotations.findNonIgnoredProperties(value::class)
+                val properties = Annotations.findNonIgnoredProperties(value::class, klaxon.propertyStrategies)
                 if (properties.isNotEmpty()) {
                     properties.forEach { prop ->
                         prop.getter.call(value)?.let { getValue ->
                             val jsonValue = klaxon.toJsonString(getValue)
-                            val jsonFieldName = Annotations.findJsonAnnotation(value::class, prop.name)?.name
+                            val jsonField = Annotations.findJsonAnnotation(value::class, prop.name)
                             val fieldName =
-                                    if (jsonFieldName != null && jsonFieldName != "") jsonFieldName
+                                    if (jsonField != null && jsonField.nameInitialized()) jsonField.name
                                     else prop.name
                             valueList.add("\"$fieldName\" : $jsonValue")
                         }
@@ -149,9 +154,8 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
         val jt = jv.propertyClass
         val result =
             if (jt is ParameterizedType) {
-                val rawType = jt.rawType
-                val isMap = (rawType as Class<*>).isAssignableFrom(AbstractMap::class.java)
-                val isCollection = Collection::class.java.isAssignableFrom(rawType)
+                val isMap = Reflection.isAssignableFromAny(AbstractMap::class.java, HashMap::class)
+                val isCollection = Reflection.isAssignableFromAny(Collection::class.java)
                 when {
                     isMap -> {
                         // Map

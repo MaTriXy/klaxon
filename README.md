@@ -23,10 +23,10 @@ Join the [`#klaxon` Slack channel](https://kotlinlang.slack.com/messages/C90AVCD
 
 Klaxon has different API's depending on your needs:
 
-- [An object binding API](#objectBindingApi) to bind JSON documents directly to your objects, and vice versa.
-- [A streaming API](#streamingApi) to process your JSON documents as they're being read.
-- [A low level API](#lowLevelApi) to manipulate JSON objects and use queries on them.
-- [A JSON path query API](#jsonPath) to extract specific parts of your JSON document while streaming.
+- [An object binding API](#object-binding-api) to bind JSON documents directly to your objects, and vice versa.
+- [A streaming API](#streaming-api) to process your JSON documents as they're being read.
+- [A low level API](#low-level-api) to manipulate JSON objects and use queries on them.
+- [A JSON path query API](#json-path-query-api) to extract specific parts of your JSON document while streaming.
 
 These four API's cover various scenarios and you can decide which one to use based on whether you want
 to stream your document and whether you need to query it.
@@ -39,7 +39,7 @@ to stream your document and whether you need to query it.
 | JSON Path query API | Yes       | Yes          | JsonObject/JsonArray |
 
 
-## <a name="objectBindingApi">Object binding API</a>
+## Object binding API
 
 ### General usage
 
@@ -132,6 +132,21 @@ class Ignored(val name: String) {
 Additionally, if you want to declare a property `private` but still want that property to be visible to
 Klaxon, you can annotate it with `@Json(ignored = false)`.
 
+### Renaming fields
+
+On top of using the `@Json(name=...)` annotation to rename fields, you can implement a field renamer yourself that
+will be applied to all the fields that Klaxon encounters, both to and from JSON. You achieve this result by passing an 
+implementation of the `FieldRenamer` interface to your `Klaxon` object:
+
+```kotlin
+    val renamer = object: FieldRenamer {
+        override fun toJson(fieldName: String) = FieldRenamer.camelToUnderscores(fieldName)
+        override fun fromJson(fieldName: String) = FieldRenamer.underscoreToCamel(fieldName)
+    }
+
+    val klaxon = Klaxon().fieldRenamer(renamer)
+```
+
 ### Custom types
 
 Klaxon will do its best to initialize the objects with what it found in the JSON document but you can take control
@@ -181,7 +196,7 @@ assert(result.flag)
 
 ### JsonValue
 
-The `Converter` type passes you an instance of the [`JsonValue`](https://github.com/cbeust/klaxon/blob/master/src/main/kotlin/com/beust/klaxon/JsonValue.kt) class.
+The `Converter` type passes you an instance of the [`JsonValue`](https://github.com/cbeust/klaxon/blob/master/klaxon/src/main/kotlin/com/beust/klaxon/JsonValue.kt) class.
 This class is a container of a Json value. It
 is guaranteed to contain one and exactly one of either a number, a string, a character, a `JsonObject` or a `JsonArray`.
 If one of these fields is set, the others are guaranteed to be `null`. Inspect that value in your converter to make
@@ -269,7 +284,7 @@ val klaxon = Klaxon().propertyStrategy(ps)
 
 You can define multiple `PropertyStrategy` instances, and in such a case, they all need to return `true` for a property to be included.
 
-## <a name="streamingApi">Streaming API</a>
+## Streaming API
 
 The streaming API is useful in a few scenarios:
 
@@ -286,7 +301,7 @@ looking to extract a single value the [`PathMatcher API`](#jsonPath) may be a be
 ### Writing JSON with the streaming API
 
 As opposed to conventional JSON libraries, Klaxon doesn't supply a `JsonWriter` class to create JSON documents since
-this need is already covered by the `json()` function, documented in the [Advanced DSL](#advancedDsl) section.
+this need is already covered by the `json()` function, documented in the [Advanced DSL](#advanced-dsl) section.
 
 ### Reading JSON with the streaming API
 
@@ -355,7 +370,7 @@ fun streamingArray() {
     }
 }
 ```
-## <a name="jsonPath">JSON Path Query API</a>
+## JSON Path Query API
 
 The [JSON Path specification](https://github.com/json-path/JsonPath) defines how to locate elements inside
 a JSON document. Klaxon allows you to define path matchers that can match specific elements in your
@@ -387,7 +402,7 @@ $.library.books[0].author
 $.library.books[1].author
 ```
 
-We'll define a [`PathMatcher`](https://github.com/cbeust/klaxon/blob/master/src/main/java/com/beust/klaxon/PathMatcher.kt) that uses a regular expression to filter only the elements we want:
+We'll define a [`PathMatcher`](https://github.com/cbeust/klaxon/blob/master/klaxon/src/main/java/com/beust/klaxon/PathMatcher.kt) that uses a regular expression to filter only the elements we want:
 
 ```kotlin
 val pathMatcher = object : PathMatcher {
@@ -416,7 +431,7 @@ Two notes:
 detected and its value completely parsed.
 
 
-## <a name="lowLevelApi">Low level API</a>
+## Low level API
 
 Values parsed from a valid JSON file can be of the following type:
 
@@ -444,7 +459,7 @@ Since this is a JSON object, we parse it as follows:
 fun parse(name: String) : Any? {
     val cls = Parser::class.java
     return cls.getResourceAsStream(name)?.let { inputStream ->
-        return Parser().parse(inputStream)
+        return Parser.default().parse(inputStream)
     }
 }
 
@@ -455,7 +470,7 @@ val obj = parse("/object.json") as JsonObject
 
 Parse from String value :
 ```kotlin
-val parser: Parser = Parser()
+val parser: Parser = Parser.default()
 val stringBuilder: StringBuilder = StringBuilder("{\"name\":\"Cedric Beust\", \"age\":23}")
 val json: JsonObject = parser.parse(stringBuilder) as JsonObject
 println("Name : ${json.string("name")}, Age : ${json.int("age")}")
@@ -621,7 +636,7 @@ Note the use of `flatMap` which transforms an initial result of a list of lists 
 You can convert any `JsonObject` to a valid JSON string by calling `toJsonString()` on it. If you want to get a pretty-printed
 version of that string, call `toJsonString(true)`
 
-## <a name="advancedDsl">Advanced DSL</a>
+## Advanced DSL
 
 Creating a JSON object with the Klaxon DSL makes it possible to insert arbitrary pieces of Kotlin code anywhere you want. For example, the following creates an object that maps each number from 1 to 3 with its string key:
 
@@ -640,7 +655,7 @@ will output:
 Result: [ { "1" : 1 }, { "2" : 2 }, { "3" : 3 }  ]
 ```
 
-Functions that you can use inside a `json {}` expression are defined in the [`KlaxonJson`](https://github.com/cbeust/klaxon/blob/master/src/main/kotlin/com/beust/klaxon/KlaxonJson.kt) class.
+Functions that you can use inside a `json {}` expression are defined in the [`KlaxonJson`](https://github.com/cbeust/klaxon/blob/master/klaxon/src/main/kotlin/com/beust/klaxon/KlaxonJson.kt) class.
 
 ## Flattening and path lookup
 
@@ -664,9 +679,21 @@ We can find all emails by
 (parse("my.json") as JsonObject).lookup<String?>("users.email")
 ```
 
-## Implementation
+## Parsers
 
-The Parser is implemented as a mutable state machine supported by a simplistic `State` monad, making the main loop very simple:
+There are two parser implementations with official support. The first is written in Kotlin and is accessed by calling
+`Parser.default()`.
+
+The second is a parser implemented using the [FasterXML Jackson](https://github.com/FasterXML/jackson) mapper.
+This parser has been found to take 1/2 the time of the default Parser on large JSON payloads.
+
+The Jackson mapper can be found at the coordinates
+`com.beust:klaxon-jackson:[version]`. To use this parser, call the extension `Parser.jackson()`.
+
+### Implementation
+
+The Kotlin based Parser is implemented as a mutable state machine supported by a simplistic `State` monad,
+making the main loop very simple:
 
 ```kotlin
 val stateMachine = StateMachine()
@@ -687,7 +714,7 @@ Here are a few common errors and how to resolve them.
 You might see the following exception:
 
 ```kotlin
-Caused by: java.lang.NoSuchMethodException: com.beust.klaxon.BindingAdapterTest$personMappingTest$Person.<init>()
+Caused by: java.lang.NoSuchMethodException: BindingAdapterTest$personMappingTest$Person.<init>()
 	at java.lang.Class.getConstructor0(Class.java:3082)
 	at java.lang.Class.newInstance(Class.java:412)
 ```

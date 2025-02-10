@@ -1,7 +1,11 @@
+@file:Suppress("UnnecessaryVariable")
+
 package com.beust.klaxon
 
 import java.lang.reflect.ParameterizedType
+import java.lang.reflect.TypeVariable
 import java.math.BigDecimal
+import java.math.BigInteger
 import kotlin.reflect.jvm.jvmErasure
 
 /**
@@ -14,17 +18,24 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
     override fun fromJson(jv: JsonValue): Any? {
         val value = jv.inside
         val propertyType = jv.propertyClass
+        val classifier = jv.propertyKClass?.classifier
         val result =
             when(value) {
-                is Boolean, is String, is Long -> value
+                is Boolean, is String -> value
                 is Int -> fromInt(value, propertyType)
+                is BigInteger, is BigDecimal -> value
                 is Double ->
-                    if (jv.propertyKClass?.classifier == kotlin.Float::class) fromFloat(value.toFloat(), propertyType)
+                    if (classifier == Float::class) fromFloat(value.toFloat(), propertyType)
                     else fromDouble(value, propertyType)
                 is Float ->
-                    if (jv.propertyKClass?.classifier == kotlin.Double::class) fromDouble(value.toDouble(),
-                            propertyType)
+                    if (classifier == Double::class) fromDouble(value.toDouble(), propertyType)
                     else fromFloat(value, propertyType)
+                is Long ->
+                    when (classifier) {
+                        Double::class -> fromDouble(value.toDouble(), propertyType)
+                        Float::class -> fromFloat(value.toFloat(), propertyType)
+                        else -> value
+                    }
                 is Collection<*> -> fromCollection(value, jv)
                 is JsonObject -> fromJsonObject(value, jv)
                 null -> null
@@ -54,26 +65,32 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
             is Map<*, *> -> {
                 val valueList = arrayListOf<String>()
                 value.entries.forEach { entry ->
-                    val jsonValue = klaxon.toJsonString(entry.value as Any)
+                    val jsonValue =
+                        if (entry.value == null) "null"
+                        else klaxon.toJsonString(entry.value as Any)
                     valueList.add("\"${entry.key}\": $jsonValue")
                 }
                 joinToString(valueList, "{", "}")
             }
+            is BigInteger -> value.toString()
             else -> {
                 val valueList = arrayListOf<String>()
                 val properties = Annotations.findNonIgnoredProperties(value::class, klaxon.propertyStrategies)
-                if (properties.isNotEmpty()) {
-                    properties.forEach { prop ->
-                        prop.getter.call(value)?.let { getValue ->
-                            val jsonValue = klaxon.toJsonString(getValue)
+                properties.forEach { prop ->
+                    val getValue = prop.getter.call(value)
+                    val getAnnotation = Annotations.findJsonAnnotation(value::class, prop.name)
+
+                    // Use instance settings only when no local settings exist
+                    if (getValue != null
+                        || (getAnnotation?.serializeNull == true) // Local settings have precedence to instance settings
+                        || (getAnnotation == null && klaxon.instanceSettings.serializeNull)
+                    ) {
+                            val jsonValue = klaxon.toJsonString(getValue, prop)
                             val fieldName = Annotations.retrieveJsonFieldName(klaxon, value::class, prop)
                             valueList.add("\"$fieldName\" : $jsonValue")
                         }
-                    }
-                    joinToString(valueList, "{", "}")
-                } else {
-                    """"$value""""
                 }
+                joinToString(valueList, "{", "}")
             }
 
         }
@@ -83,7 +100,12 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
     private fun fromInt(value: Int, propertyType: java.lang.reflect.Type?): Any {
         // If the value is an Int and the property is a Long, widen it
         val isLong = java.lang.Long::class.java == propertyType || Long::class.java == propertyType
-        return if (isLong) value.toLong() else value
+        val result: Any = when {
+            isLong -> value.toLong()
+            propertyType == BigDecimal::class.java -> BigDecimal(value)
+            else -> value
+        }
+        return result
     }
 
     private fun fromDouble(value: Double, propertyType: java.lang.reflect.Type?): Any {
@@ -110,12 +132,16 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
             if (jt is ParameterizedType) {
                 val typeArgument = jt.actualTypeArguments[0]
                 val converter =
-                    if (typeArgument is Class<*>) {
-                        klaxon.findConverterFromClass(typeArgument, null)
-                    } else if (typeArgument is ParameterizedType) {
-                        klaxon.findConverterFromClass(typeArgument.actualTypeArguments[0] as Class<*>, null)
-                    } else {
-                        throw IllegalArgumentException("Should never happen")
+                    when (typeArgument) {
+                        is Class<*> -> klaxon.findConverterFromClass(typeArgument, null)
+                        is ParameterizedType -> {
+                            when (val ta = typeArgument.actualTypeArguments[0]) {
+                                is Class<*> -> klaxon.findConverterFromClass(ta, null)
+                                is ParameterizedType -> klaxon.findConverterFromClass(ta.rawType.javaClass, null)
+                                else -> throw KlaxonException("SHOULD NEVER HAPPEN")
+                            }
+                        }
+                        else -> throw IllegalArgumentException("Should never happen")
                     }
                 val kTypeArgument = kt?.arguments!![0].type
                 converter.fromJson(JsonValue(it, typeArgument, kTypeArgument, klaxon))
@@ -131,18 +157,22 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
         }
 
         val result =
-            if (Annotations.isSet(jt)) {
-                convertedCollection.toSet()
-            } else if (Annotations.isArray(kt)) {
-                val componentType = kt?.jvmErasure?.java?.componentType
-                val array = java.lang.reflect.Array.newInstance(componentType, value.size)
-                convertedCollection.indices.forEach { i ->
-                    java.lang.reflect.Array.set(array, i, convertedCollection[i])
+                when {
+                    Annotations.isSet(jt) -> {
+                        convertedCollection.toSet()
+                    }
+                    Annotations.isArray(kt) -> {
+                        val componentType = (jt as Class<*>).componentType
+                        val array = java.lang.reflect.Array.newInstance(componentType, convertedCollection.size)
+                        convertedCollection.indices.forEach { i ->
+                            java.lang.reflect.Array.set(array, i, convertedCollection[i])
+                        }
+                        array
+                    }
+                    else -> {
+                        convertedCollection
+                    }
                 }
-                array
-            } else {
-                convertedCollection
-            }
         return result
     }
 
@@ -171,14 +201,13 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
                         result
                     }
                     isCollection -> {
-                        val type =jt.actualTypeArguments[0]
-                        when(type) {
+                        when(val type =jt.actualTypeArguments[0]) {
                             is Class<*> -> {
                                 val cls = jt.actualTypeArguments[0] as Class<*>
                                 klaxon.fromJsonObject(value, cls, cls.kotlin)
                             }
                             is ParameterizedType -> {
-                                val result2 = JsonObjectConverter(klaxon, HashMap<String, Any>()).fromJson(value,
+                                val result2 = JsonObjectConverter(klaxon, HashMap()).fromJson(value,
                                         jv.propertyKClass!!.jvmErasure)
                                 result2
 
@@ -192,11 +221,21 @@ class DefaultConverter(private val klaxon: Klaxon, private val allPaths: HashMap
                             ":\n  $value")
                 }
             } else {
-                if ((jt as Class<*>).isArray) {
-                    val typeValue = jt.componentType
-                    klaxon.fromJsonObject(value, typeValue, typeValue.kotlin)
+                if (jt is Class<*>) {
+                    if (jt.isArray) {
+                        val typeValue = jt.componentType
+                        klaxon.fromJsonObject(value, typeValue, typeValue.kotlin)
+                    } else {
+                        JsonObjectConverter(klaxon, allPaths).fromJson(jv.obj!!, jv.propertyKClass!!.jvmErasure)
+                    }
                 } else {
-                    JsonObjectConverter(klaxon, allPaths).fromJson(jv.obj!!, jv.propertyKClass!!.jvmErasure)
+                    val typeName: Any? =
+                        if (jt is TypeVariable<*>) {
+                            jt.genericDeclaration
+                        } else {
+                            jt
+                        }
+                    throw IllegalArgumentException("Generic type not supported: $typeName")
                 }
             }
         return result

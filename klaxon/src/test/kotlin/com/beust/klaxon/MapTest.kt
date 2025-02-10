@@ -98,6 +98,7 @@ class MapTest {
         assertThat(r!!.events["key1"]).isEqualTo(Node("node1"))
     }
 
+    @Test(enabled = false, description = "Need to move data.json to a better place")
     fun bigFile() {
         val ins = MapTest::class.java.getResourceAsStream("/data.json") ?:
                 throw IllegalArgumentException("Couldn't find data.json")
@@ -106,3 +107,13 @@ class MapTest {
         assertThat(r.events["-L3daccTVLOcYi9hVHsD"]?.name).isEqualTo("Registration & Breakfast")
     }
 }
+
+class Employee(val firstName: String, val lastName: String, val age: Int) {
+    val lazyValue: String by lazy {
+        val result = ""
+        result
+    }
+}
+
+
+

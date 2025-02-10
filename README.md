@@ -1,17 +1,13 @@
 
 <img src="doc/klaxon.png" alt="Klaxon logo" height="101" width="220" />
 
-Klaxon is a library to parse JSON in Kotlin.
+Klaxon is a library to parse JSON in Kotlin
 
 ## Install
 
 ```kotlin
-repositories {
-    jcenter()
-}
-
 dependencies {
-    implementation 'com.beust:klaxon:3.0.1'
+    implementation 'com.beust:klaxon:5.5'
 }
 ```
 
@@ -73,7 +69,7 @@ val result = Klaxon()
     }
     """)
 
-assert(result.name == "John Smith")
+assert(result?.name == "John Smith")
 assert(result.age == 23)
 ```
 
@@ -131,6 +127,87 @@ class Ignored(val name: String) {
 
 Additionally, if you want to declare a property `private` but still want that property to be visible to
 Klaxon, you can annotate it with `@Json(ignored = false)`.
+
+#### `index`
+
+The `index` attribute allows you to specify where in the JSON string the key should appear. This allows you to
+specify that certain keys should appear before others:
+
+```kotlin
+class Data(
+    @Json(index = 1) val id: String,
+    @Json(index = 2) val name: String
+)
+println(Klaxon().toJsonString(Data("id", "foo")))
+
+// displays { "id": "id", "name": "foo" }
+```
+
+whereas
+
+```kotlin
+class Data(
+    @Json(index = 2) val id: String,
+    @Json(index = 1) val name: String
+)
+println(Klaxon().toJsonString(Data("id", "foo")))
+
+// displays { "name": "foo" , "id": "id" }
+```
+
+Properties that are not assigned an index will be displayed in a non deterministic order in the output JSON.
+
+#### `serializeNull`
+
+By default, all properties with the value null are serialized to JSON, for example: 
+
+```kotlin
+class Data(
+    val id: Int?
+)
+println(Klaxon().toJsonString(Data(null)))
+
+// displays { "id": null }
+```
+
+If you instead want the properties with a null value to be absent in the JSON string, 
+use `@Json(serializeNull = false)`:
+
+```kotlin
+class Data(
+    @Json(serializeNull = false)
+    val id: Int?
+)
+println(Klaxon().toJsonString(Data(null)))
+
+// displays {}
+```
+
+If `serializeNull` is false, the Kotlin default values for this property will be ignored during parsing. 
+Instead, if the property is absent in the JSON, the value will default to `null`.
+
+
+If you don't want to apply this option to every attribute, you can also set it as an instance-wide setting for Klaxon:
+```kotlin
+val settings = KlaxonSettings(serializeNull = false)
+```
+
+This saves you the hassle of setting these attributes onto every single field.
+
+```kotlin
+data class User(
+    val username: String, val email: String, // mandatory
+    val phone: String?, val fax: String?, val age: Int? // optional
+)
+
+Klaxon(settings)
+  .toJsonString(User("user", "user@example.org", null, null, null))
+
+// displays {}
+```
+
+You may still set settings with the `@Json` annotation onto specific fields.
+They will take precedence over global settings of the Klaxon instance.
 
 ### Renaming fields
 
@@ -284,6 +361,100 @@ val klaxon = Klaxon().propertyStrategy(ps)
 
 You can define multiple `PropertyStrategy` instances, and in such a case, they all need to return `true` for a property to be included.
 
+### Polymorphism
+
+JSON documents sometimes contain dynamic payloads whose type can vary. Klaxon supports two different use cases for
+polymorphism: polymorphic classes and polymorphic fields. Klaxon gives you control on polymorphism with the
+annotation `@TypeFor`, which can be placed either on a class or on a field.
+
+#### Polymorphic classes
+
+A polymorphic class is a class whose actual type is defined by one of its own properties. Consider this JSON:
+
+```json
+[
+    { "type": "rectangle", "width": 100, "height": 50 },
+    { "type": "circle", "radius": 20}
+]
+```
+
+The content of the field `type` determines the class that needs to be instantiated. You would model this as
+follows with Klaxon:
+
+```kotlin
+@TypeFor(field = "type", adapter = ShapeTypeAdapter::class)
+open class Shape(val type: String)
+data class Rectangle(val width: Int, val height: Int): Shape("rectangle")
+data class Circle(val radius: Int): Shape("circle")
+```
+
+The type adapter is as follows:
+
+```kotlin
+class ShapeTypeAdapter: TypeAdapter<Shape> {
+    override fun classFor(type: Any): KClass<out Shape> = when(type as String) {
+        "rectangle" -> Rectangle::class
+        "circle" -> Circle::class
+        else -> throw IllegalArgumentException("Unknown type: $type")
+    }
+}
+```
+
+#### Polymorphic fields
+
+Klaxon also allows a field to determine the class to be instantiated for another field. Consider the following JSON document:
+
+```json
+[
+    { "type": 1, "shape": { "width": 100, "height": 50 } },
+    { "type": 2, "shape": { "radius": 20} }
+]
+```
+
+This is an array of polymorphic objects. The `type` field is a discriminant which determines the type of the field
+`shape`: if its value is `1`, the shape is a rectangle, if `2`, it's a circle.
+
+To parse this document with Klaxon, we first model these classes with a hierarchy:
+
+```kotlin
+open class Shape
+data class Rectangle(val width: Int, val height: Int): Shape()
+data class Circle(val radius: Int): Shape()
+```
+
+We then define the class that the objects of this array are instances of:
+
+```kotlin
+class Data (
+    @TypeFor(field = "shape", adapter = ShapeTypeAdapter::class)
+    val type: Integer,
+
+    val shape: Shape
+)
+```
+
+Notice the `@TypeFor` annotation, which tells Klaxon which field this value is a discriminant for, and also provides
+a class that will translate these integer values into the correct class:
+
+```kotlin
+class ShapeTypeAdapter: TypeAdapter<Shape> {
+    override fun classFor(type: Any): KClass<out Shape> = when(type as Int) {
+        1 -> Rectangle::class
+        2 -> Circle::class
+        else -> throw IllegalArgumentException("Unknown type: $type")
+    }
+}
+```
+
+With this code in place, you can now parse the provided JSON document above the regular way and the the following
+tests will pass:
+
+```kotlin
+val shapes = Klaxon().parseArray<Data>(json)
+assertThat(shapes!![0].shape as Rectangle).isEqualTo(Rectangle(100, 50))
+assertThat(shapes[1].shape as Circle).isEqualTo(Circle(20))
+```
+
 ## Streaming API
 
 The streaming API is useful in a few scenarios:
@@ -296,12 +467,12 @@ This second point is especially important to make mobile apps as responsive as p
 on network speed.  
 
 Note: the streaming API requires that each value in the document be handled by the reader.  If you are simply
-looking to extract a single value the [`PathMatcher API`](#jsonPath) may be a better fit.
+looking to extract a single value the [`PathMatcher API`](#json-path-query-api) may be a better fit.
 
 ### Writing JSON with the streaming API
 
 As opposed to conventional JSON libraries, Klaxon doesn't supply a `JsonWriter` class to create JSON documents since
-this need is already covered by the `json()` function, documented in the [Advanced DSL](#advanced-dsl) section.
+this need is already covered by the `json()` function, documented in the [Advanced DSL](#dsl) section.
 
 ### Reading JSON with the streaming API
 
@@ -376,7 +547,7 @@ The [JSON Path specification](https://github.com/json-path/JsonPath) defines how
 a JSON document. Klaxon allows you to define path matchers that can match specific elements in your
 document and receive a callback each time a matching element is found.
 
-Consider the following docoument:
+Consider the following document:
 
 ```json
 {
@@ -636,26 +807,40 @@ Note the use of `flatMap` which transforms an initial result of a list of lists 
 You can convert any `JsonObject` to a valid JSON string by calling `toJsonString()` on it. If you want to get a pretty-printed
 version of that string, call `toJsonString(true)`
 
-## Advanced DSL
+## DSL
 
-Creating a JSON object with the Klaxon DSL makes it possible to insert arbitrary pieces of Kotlin code anywhere you want. For example, the following creates an object that maps each number from 1 to 3 with its string key:
+You can easily create JSON objects with Klaxon's DSL. There are two different variants of that DSL: declarative and imperative.
+
+The declarative DSL uses maps and pairs (with the `to` operator) to declare the associations between your keys and your values:
 
 ```kotlin
-val logic = json {
-    array(listOf(1,2,3).map {
-        obj(it.toString() to it)
-    })
+val obj = json {
+    "color" to "red",
+    "age" to 23
 }
-println("Result: ${logic.toJsonString()}")
 ```
 
-will output:
+The declarative syntax limits you to only having values in your object, so if you need to use arbitrary pieces of code inside your DSL object, you can use the imperative syntax instead. This syntax doesn't use pairs but lambdas, and you use the function `put()` to define your fields:
 
-```text
-Result: [ { "1" : 1 }, { "2" : 2 }, { "3" : 3 }  ]
+```kotlin
+val obj = json {
+   repeat(3) {
+      put("field$it", it * 2)
+   }
+}
 ```
 
-Functions that you can use inside a `json {}` expression are defined in the [`KlaxonJson`](https://github.com/cbeust/klaxon/blob/master/klaxon/src/main/kotlin/com/beust/klaxon/KlaxonJson.kt) class.
+Output:
+
+```json
+{
+  "fields": {
+    "field0": 0,
+    "field1": 2,
+    "field2": 4
+  }
+}
+```
 
 ## Flattening and path lookup
 

@@ -13,7 +13,9 @@ import kotlin.reflect.jvm.javaField
 import kotlin.reflect.jvm.javaMethod
 import kotlin.reflect.jvm.javaType
 
-class Klaxon : ConverterFinder {
+class Klaxon(
+    val instanceSettings: KlaxonSettings = KlaxonSettings()
+) : ConverterFinder {
     /**
      * Parse a JsonReader into a JsonObject.
      */
@@ -53,15 +55,17 @@ class Klaxon : ConverterFinder {
      * Parse a JSON file into an object.
      */
     @Suppress("unused")
-    inline fun <reified T> parse(file: File): T?
-            = maybeParse(parser(T::class).parse(FileReader(file)) as JsonObject)
+    inline fun <reified T> parse(file: File): T? = FileReader(file).use { reader ->
+        maybeParse(parser(T::class).parse(reader) as JsonObject)
+    }
 
     /**
      * Parse a JSON file into a List.
      */
     @Suppress("unused")
-    inline fun <reified T> parseArray(file: File): List<T>?
-            = parseFromJsonArray(parser(T::class).parse(FileReader(file)) as JsonArray<*>)
+    inline fun <reified T> parseArray(file: File): List<T>? = FileReader(file).use { reader ->
+        parseFromJsonArray(parser(T::class).parse(reader) as JsonArray<*>)
+    }
 
     /**
      * Parse an InputStream into an object.
@@ -237,7 +241,7 @@ class Klaxon : ConverterFinder {
 
         var propertyClass: Class<*>? = null
         val propConverter : Converter? =
-            if (prop != null) {
+            if (prop != null && prop.returnType.classifier is KClass<*>) {
                 propertyClass = (prop.returnType.classifier as KClass<*>).java
                 val dc = prop.getter.javaMethod?.declaringClass ?: prop.javaField?.declaringClass
                 annotationsForProp(prop, dc!!).mapNotNull {
@@ -247,7 +251,7 @@ class Klaxon : ConverterFinder {
                 null
             }
 
-        var result = propConverter
+        val result = propConverter
                 ?: findBestConverter(cls, prop)
                 ?: (if (propertyClass != null) findBestConverter(propertyClass, prop) else null)
                 ?: DEFAULT_CONVERTER
@@ -264,9 +268,11 @@ class Klaxon : ConverterFinder {
         return converters.firstOrNull { it.canConvert(toConvert) }
     }
 
-    fun toJsonString(value: Any?): String = if (value == null) "null" else toJsonString(value, findConverter(value))
+    fun toJsonString(value: Any?, prop: KProperty<*>? = null): String
+            = if (value == null) "null" else toJsonString(value, findConverter(value, prop))
 
-    private fun toJsonString(value: Any, converter: Any /* can be Converter or Converter */) : String {
+    private fun toJsonString(value: Any, converter: Any /* can be Converter or Converter */)
+            : String {
         // It's not possible to safely call converter.toJson(value) since its parameter is generic,
         // so use reflection
         val toJsonMethod = converter::class.functions.firstOrNull { it.name == "toJson" }
@@ -292,9 +298,14 @@ class Klaxon : ConverterFinder {
         return classConverter.fromJson(JsonValue(jsonObject, cls, type, this@Klaxon)) as Any
     }
 
-    fun warn(s: String) = println("Warning: $s")
+    /**
+     * Convert the parameter into a JsonObject
+     */
+    @Suppress("unused")
+    fun toJsonObject(obj: Any) = JsonValue.convertToJsonObject(obj, this)
 
     fun log(s: String) {
         if (Debug.verbose) println(s)
     }
+
 }
